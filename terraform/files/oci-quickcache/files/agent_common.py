@@ -8,6 +8,21 @@ from pathlib import Path
 from typing import Any
 
 
+def core_api():
+    """Bound control-plane calls so an unavailable API cannot hang a loop forever."""
+    from kubernetes import client
+
+    class BoundedApiClient(client.ApiClient):
+        def call_api(self, *args, **kwargs):
+            if kwargs.get("_request_timeout") is None:
+                kwargs["_request_timeout"] = (5, 15)
+            return super().call_api(*args, **kwargs)
+
+    configuration = client.Configuration.get_default_copy()
+    configuration.retries = 0
+    return client.CoreV1Api(BoundedApiClient(configuration))
+
+
 def enter_host_namespaces() -> None:
     """Enter the host mount and network namespaces and chroot to the host."""
     host_root_fd = os.open("/proc/1/root", os.O_RDONLY | os.O_DIRECTORY)

@@ -20,6 +20,7 @@ from pathlib import Path
 from kubernetes import client, config
 
 from agent_common import (
+    core_api,
     enter_host_namespaces as _enter_host_namespaces,
     patch_node_json_annotation,
     read_configmap_json_objects,
@@ -194,14 +195,17 @@ def _stop(*_args) -> None:
 
 def main() -> None:
     config.load_incluster_config()
-    core = client.CoreV1Api()
-    node = core.read_node(os.environ["NODE_NAME"])
-    os.environ["NODE_UID"] = str(node.metadata.uid)
+    core = core_api()
+    node_uid = None
     signal.signal(signal.SIGTERM, _stop)
     signal.signal(signal.SIGINT, _stop)
     interval = int(os.environ.get("RECONCILE_INTERVAL", "30"))
     while not STOP_EVENT.is_set():
         try:
+            if node_uid is None:
+                node = core.read_node(os.environ["NODE_NAME"])
+                node_uid = str(node.metadata.uid)
+                os.environ["NODE_UID"] = node_uid
             reconcile(core)
         except Exception:
             LOG.exception("migration reconciliation failed")

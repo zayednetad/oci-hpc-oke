@@ -34,6 +34,11 @@ locals {
     var.worker_gmc_enabled ? "oke-gmc" : "",
   ]))
   quickcache_values = yamlencode({
+    stateBackup = {
+      enabled    = var.quickcache_state_backup_secret != ""
+      secretName = var.quickcache_state_backup_secret
+      prefix     = var.quickcache_state_backup_prefix
+    }
     controller = {
       virtualShards        = var.quickcache_virtual_shards
       rebalanceMode        = var.quickcache_rebalance_mode

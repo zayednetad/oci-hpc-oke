@@ -1,4 +1,10 @@
 {{- $localPath := clean .Values.cache.localPath -}}
+{{- if and .Values.stateBackup.enabled (empty .Values.stateBackup.secretName) -}}
+{{- fail "stateBackup.secretName is required when external backups are enabled" -}}
+{{- end -}}
+{{- if empty (trimAll "/" .Values.stateBackup.prefix) -}}
+{{- fail "stateBackup.prefix must not be empty" -}}
+{{- end -}}
 {{- if not (regexMatch `^/mnt/nvme/[^/].*` $localPath) -}}
 {{- fail "cache.localPath must be an absolute child of /mnt/nvme" -}}
 {{- end -}}

@@ -298,6 +298,8 @@ variableGroups:
     - quickcache_rebalance_mode
     - quickcache_rebalance_grace_period
     - quickcache_map_backup_retention
+    - quickcache_state_backup_secret
+    - quickcache_state_backup_prefix
     - quickcache_max_cache_age
     - quickcache_map_reload_interval
     - quickcache_cache_range_gets
@@ -1398,6 +1400,24 @@ variables:
     default: 20
     minimum: 1
     maximum: 100
+    visible:
+      and:
+        - ${install_quickcache}
+        - ${quickcache_advanced_options}
+  quickcache_state_backup_secret:
+    title: QuickCache external state backup Secret
+    description: Existing Secret in kube-system with S3 credentials, region, endpoint and backup bucket. Empty disables external snapshots. No credentials are stored in Terraform.
+    type: string
+    default: ""
+    visible:
+      and:
+        - ${install_quickcache}
+        - ${quickcache_advanced_options}
+  quickcache_state_backup_prefix:
+    title: QuickCache external backup prefix
+    description: Use a cluster-specific prefix in your private backup bucket. Snapshots run every five minutes when enabled.
+    type: string
+    default: quickcache-state
     visible:
       and:
         - ${install_quickcache}

@@ -433,7 +433,7 @@ resource "null_resource" "validate_quickcache" {
     }
     precondition {
       condition     = !local.invalid_quickcache_staged_shard_count
-      error_message = "QuickCache automatic and manual rebalance modes support at most 4096 virtual shards to keep staged state within the Kubernetes ConfigMap size limit."
+      error_message = "QuickCache automatic/manual rebalance allows at most 4096 virtual shards. Runtime state-size checks also apply; the shard cap alone does not guarantee every migration plan fits."
     }
   }
 }

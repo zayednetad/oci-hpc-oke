@@ -1,0 +1,116 @@
+{{- if .Values.stateBackup.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "oci-quickcache.fullname" . }}-backup
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "oci-quickcache.fullname" . }}-backup
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: [{{ .Values.stateConfigMapName | quote }}]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "oci-quickcache.fullname" . }}-backup
+  namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "oci-quickcache.fullname" . }}-backup
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "oci-quickcache.fullname" . }}-backup
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "oci-quickcache.fullname" . }}-state-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "oci-quickcache.labels" . | nindent 4 }}
+    app.kubernetes.io/component: state-backup
+spec:
+  schedule: {{ .Values.stateBackup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 240
+      template:
+        metadata:
+          labels:
+            {{- include "oci-quickcache.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: state-backup
+        spec:
+          serviceAccountName: {{ include "oci-quickcache.fullname" . }}-backup
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.controller.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.controller.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumes:
+            - name: runtime
+              configMap:
+                name: {{ include "oci-quickcache.fullname" . }}-runtime
+            - name: tmp
+              emptyDir: {}
+          containers:
+            - name: backup
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: ["uv", "run", "/runtime/state_backup.py", "backup"]
+              envFrom:
+                - secretRef:
+                    name: {{ .Values.stateBackup.secretName | quote }}
+              env:
+                - name: UV_CACHE_DIR
+                  value: /tmp/uv-cache
+                - name: POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace
+                - name: STATE_CONFIGMAP_NAME
+                  value: {{ .Values.stateConfigMapName | quote }}
+                - name: S3_PREFIX
+                  value: {{ .Values.stateBackup.prefix | quote }}
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 96Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi
+              volumeMounts:
+                - name: runtime
+                  mountPath: /runtime
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 65534
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+{{- end }}

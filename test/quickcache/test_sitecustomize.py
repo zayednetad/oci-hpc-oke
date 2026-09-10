@@ -357,6 +357,21 @@ class CacheFilesystemTests(unittest.TestCase):
             )
             self.assertGreater(sitecustomize._freshness_mtime(path), old_ns / 1e9)
 
+    def test_unavailable_owner_with_last_known_map_falls_back_to_object_storage(self):
+        client = SimpleNamespace(meta=SimpleNamespace(
+            service_model=SimpleNamespace(service_name="s3"),
+            endpoint_url="https://namespace.example", region_name="test-region",
+        ))
+        response = {"Body": io.BytesIO(b"original-data")}
+        with mock.patch.object(sitecustomize, "_refresh_maps", return_value=(
+                {str(i): "/mounts/unavailable-owner" for i in range(16)}, {})), \
+             mock.patch.object(sitecustomize.os, "stat", side_effect=OSError("NFS unavailable")), \
+             mock.patch.object(sitecustomize, "_log"), \
+             mock.patch.object(sitecustomize, "_ORIGINAL_CALL", return_value=response) as original:
+            actual = sitecustomize._patched_call(client, "GetObject", {"Bucket": "bucket", "Key": "object"})
+        self.assertEqual(actual["Body"].read(), b"original-data")
+        original.assert_called_once_with(client, "GetObject", {"Bucket": "bucket", "Key": "object"})
+
     def test_previous_owner_serves_hit_during_rebalance_fallback(self):
         client = SimpleNamespace(
             meta=SimpleNamespace(
