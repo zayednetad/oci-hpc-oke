@@ -123,8 +123,9 @@ def _evaluate(
 
 def main() -> None:
     config.load_incluster_config()
-    core = client.CoreV1Api()
-    apps = client.AppsV1Api()
+    from agent_common import core_api
+    core = core_api()
+    apps = client.AppsV1Api(core.api_client)
     namespace = os.environ["POD_NAMESPACE"]
     enabled_label = os.environ["QUICKCACHE_LABEL"]
     ready_label = os.environ["QUICKCACHE_READY_LABEL"]

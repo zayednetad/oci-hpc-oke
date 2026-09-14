@@ -380,6 +380,26 @@ variable "quickcache_rebalance_grace_period" {
   }
 }
 
+variable "quickcache_state_backup_secret" {
+  description = "Existing Secret in the QuickCache namespace with S3 backup credentials and endpoint/bucket. Empty disables external snapshots."
+  type        = string
+  default     = ""
+  validation {
+    condition     = var.quickcache_state_backup_secret == "" || can(regex("^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$", var.quickcache_state_backup_secret))
+    error_message = "quickcache_state_backup_secret must be empty or a Kubernetes Secret name."
+  }
+}
+
+variable "quickcache_state_backup_prefix" {
+  description = "Cluster-specific Object Storage key prefix for full QuickCache state snapshots."
+  type        = string
+  default     = "quickcache-state"
+  validation {
+    condition     = length(trim(var.quickcache_state_backup_prefix, "/")) > 0
+    error_message = "quickcache_state_backup_prefix must not be empty."
+  }
+}
+
 variable "quickcache_map_backup_retention" {
   default     = 20
   type        = number

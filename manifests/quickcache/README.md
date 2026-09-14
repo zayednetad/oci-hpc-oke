@@ -14,6 +14,12 @@ checksum behavior for the OCI Object Storage S3 Compatibility API.
 
 The Secret is an example only. Do not commit real customer credentials.
 
+For state-size checks, API diagnostics and optional independent Object Storage
+backups, see the [state resilience test guide](../../docs/quickcache-state-resilience-testing.md).
+`check-state.py capacity` runs offline; `status` and `probe` only read the cluster.
+`state-backup-secret.example.yaml` is a separate Secret for a private backup
+bucket, not the workload's S3 test Secret.
+
 With the default `friendly` cache path layout, successful misses write safely
 encoded, recognizable bucket/object-key paths under each shard's `v2`
 directory. The filename ends in `.__qc_<24 hex characters>` to distinguish

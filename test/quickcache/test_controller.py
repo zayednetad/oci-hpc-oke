@@ -138,22 +138,17 @@ class ControllerTests(unittest.TestCase):
             ],
         )
 
-    def test_non_object_shard_state_is_rebuilt(self):
+    def test_non_object_shard_state_is_rejected_without_rebuilding(self):
         configmap = SimpleNamespace(
-            data={"shard_map.json": "[]"},
+            data={"shard_map.json": "[]", "peers.json": "{}"},
             metadata=SimpleNamespace(resource_version="42"),
         )
         core = SimpleNamespace(
             read_namespaced_config_map=lambda *_args, **_kwargs: configmap
         )
 
-        state, resource_version, annotations = controller._load_state(
-            core, "ns", "state"
-        )
-
-        self.assertEqual(state["active"], {})
-        self.assertEqual(resource_version, "42")
-        self.assertEqual(annotations, {})
+        with self.assertRaisesRegex(ValueError, "must be an object"):
+            controller._load_state(core, "ns", "state")
 
     def test_automatic_rebalance_keeps_active_map_until_copy_completes(self):
         state = {

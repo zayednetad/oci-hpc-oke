@@ -495,11 +495,9 @@ def _stop(*_args) -> None:
 def main() -> None:
     _validate_configuration()
     config.load_incluster_config()
-    core = client.CoreV1Api()
-    node = core.read_node(os.environ["NODE_NAME"])
-    node_uid = str(node.metadata.uid)
-    if not UID_RE.fullmatch(node_uid):
-        raise RuntimeError(f"unexpected Kubernetes Node UID: {node_uid}")
+    from agent_common import core_api
+    core = core_api()
+    node_uid = None
 
     interval = int(os.environ.get("RECONCILE_INTERVAL", "30"))
     READY_FILE.unlink(missing_ok=True)
@@ -511,6 +509,12 @@ def main() -> None:
     signal.signal(signal.SIGINT, _stop)
     while not STOP_EVENT.is_set():
         try:
+            if node_uid is None:
+                node = core.read_node(os.environ["NODE_NAME"])
+                node_uid = str(node.metadata.uid)
+                if not UID_RE.fullmatch(node_uid):
+                    node_uid = None
+                    raise RuntimeError("unexpected Kubernetes Node UID")
             reconcile(core, node_uid)
             HEALTH_FILE.touch()
             READY_FILE.touch()

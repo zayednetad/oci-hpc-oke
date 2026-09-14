@@ -14,6 +14,7 @@ from pathlib import Path
 
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
+from agent_common import core_api
 
 from rebalance import (
     advance_staged_rebalance,
@@ -28,6 +29,7 @@ from state_store import (
     load_state as _load_state,
     map_digest as _map_digest,
     write_state as _write_state,
+    state_data,
 )
 
 
@@ -313,6 +315,8 @@ def reconcile(core: client.CoreV1Api) -> None:
 
     if before == json.dumps(state, sort_keys=True):
         return
+    # Reject before creating a pre-cutover backup or changing live state.
+    state_data(state)
     if original_active != state["active"]:
         _backup_shard_map(
             core,
@@ -343,17 +347,30 @@ def reconcile(core: client.CoreV1Api) -> None:
 
 def main() -> None:
     config.load_incluster_config()
-    core = client.CoreV1Api()
+    core = core_api()
     interval = int(os.environ.get("RECONCILE_INTERVAL", "30"))
     READY_FILE.unlink(missing_ok=True)
     HEALTH_FILE.touch()
+    recovery_until = time.monotonic() + int(os.environ.get("HEARTBEAT_TIMEOUT", "120"))
+    LOG.info("event=controller_recovery_wait reason=startup seconds=%s",
+             os.environ.get("HEARTBEAT_TIMEOUT", "120"))
     while True:
         try:
+            # Agents need a full heartbeat window after an API outage to
+            # rejoin before stale timestamps are interpreted as lost owners.
+            if time.monotonic() < recovery_until:
+                core.list_node(limit=1)
+                HEALTH_FILE.touch()
+                time.sleep(interval)
+                continue
             reconcile(core)
             HEALTH_FILE.touch()
             READY_FILE.touch()
         except Exception:
             READY_FILE.unlink(missing_ok=True)
+            recovery_until = time.monotonic() + int(os.environ.get("HEARTBEAT_TIMEOUT", "120"))
+            LOG.warning("event=controller_recovery_wait reason=reconcile_failure seconds=%s",
+                        os.environ.get("HEARTBEAT_TIMEOUT", "120"))
             LOG.exception("reconciliation failed")
         time.sleep(interval)
 

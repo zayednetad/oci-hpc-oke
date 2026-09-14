@@ -12,6 +12,48 @@ from kubernetes.client.rest import ApiException
 
 
 LOG = logging.getLogger("quickcache-state-store")
+STATE_MAX_BYTES = 900 * 1024
+STATE_WARN_BYTES = 750 * 1024
+STATE_FIELDS = {
+    "peers": "peers.json",
+    "active": "shard_map.json",
+    "pending": "pending_shard_map.json",
+    "previous": "previous_shard_map.json",
+    "rebalance": "rebalance.json",
+}
+
+
+def data_size(data: dict[str, str]) -> int:
+    """Conservative UTF-8 budget: include keys as well as ConfigMap values."""
+    return sum(
+        len(key.encode("utf-8")) + len(value.encode("utf-8"))
+        for key, value in data.items()
+    )
+
+
+def checked_data(data: dict[str, str]) -> dict[str, str]:
+    size = data_size(data)
+    if size > STATE_MAX_BYTES:
+        LOG.error("event=state_size_rejected bytes=%d limit=%d", size, STATE_MAX_BYTES)
+        raise ValueError(
+            f"QuickCache state uses {size} bytes; safety limit is {STATE_MAX_BYTES}"
+        )
+    if size >= STATE_WARN_BYTES:
+        LOG.warning("event=state_size_warning bytes=%d limit=%d", size, STATE_MAX_BYTES)
+    return data
+
+
+def state_data(state: dict, now: int | None = None) -> dict[str, str]:
+    """Keep one atomic snapshot and existing JSON keys, without whitespace waste."""
+    data = {
+        key: json.dumps(state[field], sort_keys=True, separators=(",", ":"))
+        for field, key in STATE_FIELDS.items()
+    }
+    data.update(
+        generation=str(state["generation"]),
+        updated_at=str(int(time.time()) if now is None else now),
+    )
+    return checked_data(data)
 
 
 def empty_state() -> dict:
@@ -29,11 +71,11 @@ def _json_object(data: dict, key: str) -> dict:
     try:
         value = json.loads(data.get(key, "{}"))
     except (TypeError, json.JSONDecodeError):
-        LOG.warning("QuickCache state field %s is invalid; ignoring it", key)
-        return {}
+        raise ValueError(
+            f"QuickCache state field {key} is invalid; restore valid state"
+        )
     if not isinstance(value, dict):
-        LOG.warning("QuickCache state field %s is not an object; ignoring it", key)
-        return {}
+        raise ValueError(f"QuickCache state field {key} must be an object")
     return value
 
 
@@ -50,11 +92,16 @@ def load_state(
             return empty_state(), None, {}
         raise
     data = configmap.data or {}
+    if "peers.json" not in data or "shard_map.json" not in data:
+        raise ValueError(
+            "QuickCache state is missing peers.json or shard_map.json; restore valid state"
+        )
     try:
-        generation = max(0, int(data.get("generation", "0")))
+        generation = int(data.get("generation", "0"))
+        if generation < 0:
+            raise ValueError("negative generation")
     except (TypeError, ValueError):
-        LOG.warning("QuickCache generation is invalid; resetting it")
-        generation = 0
+        raise ValueError("QuickCache generation is invalid; restore valid state")
     state = {
         "peers": _json_object(data, "peers.json"),
         "active": _json_object(data, "shard_map.json"),
@@ -87,26 +134,17 @@ def write_state(
             annotations=annotations,
             resource_version=resource_version,
         ),
-        data={
-            "peers.json": json.dumps(state["peers"], indent=2, sort_keys=True),
-            "shard_map.json": json.dumps(state["active"], indent=2, sort_keys=True),
-            "pending_shard_map.json": json.dumps(
-                state["pending"], indent=2, sort_keys=True
-            ),
-            "previous_shard_map.json": json.dumps(
-                state["previous"], indent=2, sort_keys=True
-            ),
-            "rebalance.json": json.dumps(
-                state["rebalance"], indent=2, sort_keys=True
-            ),
-            "generation": str(state["generation"]),
-            "updated_at": str(int(time.time())),
-        },
+        data=state_data(state),
     )
     if resource_version:
         core.replace_namespaced_config_map(name, namespace, body)
     else:
         core.create_namespaced_config_map(namespace, body)
+    LOG.info(
+        "event=state_published bytes=%d generation=%s",
+        data_size(body.data),
+        state["generation"],
+    )
 
 
 def map_digest(shard_map: dict) -> str:
@@ -130,8 +168,7 @@ def backup_shard_map(
     old_digest = map_digest(old_map)
     new_digest = map_digest(new_map)
     name = (
-        f"{state_name[:160]}-map-g{generation:08d}-"
-        f"{old_digest[:12]}-{new_digest[:12]}"
+        f"{state_name[:160]}-map-g{generation:08d}-{old_digest[:12]}-{new_digest[:12]}"
     )
     owner_id = hashlib.sha256(state_name.encode("utf-8")).hexdigest()[:16]
     timestamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime(now))
@@ -150,13 +187,15 @@ def backup_shard_map(
                 "oci-hpc-oke.oracle.com/quickcache-new-map-sha256": new_digest,
             },
         ),
-        data={
-            f"shard_map.{timestamp}.bak": json.dumps(
-                old_map, indent=2, sort_keys=True
-            ),
-            "generation": str(generation),
-            "created_at": str(now),
-        },
+        data=checked_data(
+            {
+                f"shard_map.{timestamp}.bak": json.dumps(
+                    old_map, separators=(",", ":"), sort_keys=True
+                ),
+                "generation": str(generation),
+                "created_at": str(now),
+            }
+        ),
     )
     try:
         core.create_namespaced_config_map(namespace, body)

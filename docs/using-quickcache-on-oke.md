@@ -98,9 +98,13 @@ quickcache_map_backup_retention   = 20
 
 Node-loss failover is always immediate because an unavailable source cannot be
 migrated. This rule applies independently of the selected scale-out mode.
-Automatic and manual modes support at most 4,096 virtual shards so their
-active, pending, previous, and migration-plan state remains below the
-Kubernetes ConfigMap size limit. The default is 1,024.
+Automatic and manual modes allow at most 4,096 virtual shards. Actual serialized
+state is checked before publication: compact JSON warns at 750 KiB and rejects
+updates above 900 KiB, leaving the last valid map in place. A shard-count cap
+alone does not guarantee that every cluster/plan fits. The default is 1,024.
+See [state resilience and acceptance tests](quickcache-state-resilience-testing.md)
+for measured capacity, external Object Storage backups, restore procedures,
+API-outage behavior and production qualification.
 
 Choose the on-disk object layout with:
 

@@ -11,6 +11,14 @@ quickcacheClientReadyLabel: oci-hpc-oke.oracle.com/quickcache-client-ready
 heartbeatAnnotation: oci-hpc-oke.oracle.com/quickcache-heartbeat
 stateConfigMapName: oci-quickcache-state
 
+# Optional external full-state snapshots. Credentials live only in an existing
+# Kubernetes Secret; choose a cluster-specific prefix in a private bucket.
+stateBackup:
+  enabled: false
+  secretName: ""
+  schedule: "*/5 * * * *"
+  prefix: quickcache-state
+
 controller:
   reconcileInterval: 30
   heartbeatTimeout: 120
